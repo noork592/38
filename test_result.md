@@ -62,6 +62,9 @@ frontend:
       - working: true
         agent: "main"
         comment: "Added routeDate state (default today IST), fetch bags-by-date, orange 'N bags' badge next to each transport in sequence + total bags in header + customer names. Verified via screenshot with 3 test dispatches."
+      - working: true
+        agent: "main"
+        comment: "Added Print button (data-testid tr-sequence-print) that builds a clean route sheet (stops, bags, parties, km/min, signature lines) and prints via hidden iframe. Verified sheet content via screenshot."
   - task: "Login page and dashboard render (desktop + mobile)"
     implemented: true
     working: true

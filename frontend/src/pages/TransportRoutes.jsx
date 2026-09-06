@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import {
   MapPin, Factory, Plus, Trash2, Route as RouteIcon, Save, Loader2, ListChecks,
   Map as MapIcon, Satellite, Pencil, Check, X, Crosshair, Truck, Navigation, Copy, ExternalLink, Search,
-  Package, CalendarDays,
+  Package, CalendarDays, Printer,
 } from "lucide-react";
 import DatePicker from "@/components/DatePicker";
 import { todayIso } from "@/lib/dates";
@@ -242,6 +242,112 @@ export default function TransportRoutes() {
   }, [routeDate]);
 
   const bagsFor = (t) => bagsByTransport[(t?.name || "").trim().toLowerCase()] || null;
+
+  // ── Print the route sequence as a clean driver route sheet. Rendered into a
+  // hidden iframe (same technique as the Dispatch Report) so it works in
+  // Chrome, Safari and iOS/Android PWA standalone mode.
+  const printRouteSheet = () => {
+    if (orderedStops.length === 0) { toast.error("Select at least one transport first."); return; }
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const prettyDate = (() => {
+      const [y, m, d] = routeDate.split("-").map((x) => parseInt(x, 10));
+      return new Date(y, m - 1, d).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+    })();
+    const totalBags = orderedStops.reduce((s, t) => s + (bagsFor(t)?.total_bags || 0), 0);
+    const totalDispatches = orderedStops.reduce((s, t) => s + (bagsFor(t)?.dispatch_count || 0), 0);
+    const rows = orderedStops.map((t, i) => {
+      const b = bagsFor(t);
+      const n = b?.total_bags || 0;
+      return `<tr>
+        <td class="num"><span class="badge">${i + 1}</span></td>
+        <td class="name">${esc(t.name)}${i === orderedStops.length - 1 ? '<span class="final">Final stop</span>' : ""}</td>
+        <td class="bags ${n > 0 ? "hot" : "zero"}">${n}</td>
+        <td class="parties">${b?.customers?.length ? esc(b.customers.join(", ")) : '<span class="muted">—</span>'}${b?.dispatch_count ? `<div class="muted small">${b.dispatch_count} dispatch${b.dispatch_count > 1 ? "es" : ""}</div>` : ""}</td>
+        <td class="coords">${Number(t.lat).toFixed(4)}, ${Number(t.lng).toFixed(4)}</td>
+        <td class="tick"></td>
+      </tr>`;
+    }).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Route Sheet · ${esc(routeDate)}</title>
+<style>
+  @page { margin: 10mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; color: #0f172a; }
+  body { padding: 8mm; font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 12px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .head { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 3px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
+  .brand { font-size: 18px; font-weight: 900; letter-spacing: .02em; }
+  .brand small { display: block; font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: #64748b; font-weight: 700; margin-top: 2px; }
+  .title { text-align: right; }
+  .title .t { font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: #E65100; font-weight: 800; }
+  .title .d { font-size: 16px; font-weight: 800; margin-top: 2px; }
+  .kpis { display: flex; gap: 8px; margin-bottom: 12px; }
+  .kpi { flex: 1; border: 1px solid #e2e8f0; padding: 6px 10px; }
+  .kpi .l { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: #64748b; font-weight: 700; }
+  .kpi .v { font-size: 18px; font-weight: 900; font-family: "IBM Plex Mono", Menlo, monospace; }
+  .kpi .v.hot { color: #E65100; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: #334155; background: #f1f5f9; border: 1px solid #cbd5e1; padding: 6px 8px; }
+  td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; }
+  tr { break-inside: avoid; }
+  td.num { width: 34px; text-align: center; }
+  .badge { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; background: #E65100; color: #fff; font-weight: 900; font-size: 11px; align-items: center; justify-content: center; }
+  .badge.start { border-radius: 3px; background: #0f172a; color: #fcd34d; font-size: 9px; }
+  td.name { font-size: 14px; font-weight: 800; }
+  .final { display: inline-block; margin-left: 8px; font-size: 8px; letter-spacing: .12em; text-transform: uppercase; color: #E65100; border: 1px solid #E65100; padding: 1px 5px; vertical-align: middle; font-weight: 800; }
+  td.bags { width: 70px; text-align: center; font-family: "IBM Plex Mono", Menlo, monospace; font-size: 18px; font-weight: 900; }
+  td.bags.hot { background: #fff7ed; color: #E65100; }
+  td.bags.zero { color: #94a3b8; }
+  td.parties { font-size: 11px; }
+  td.coords { width: 120px; font-family: "IBM Plex Mono", Menlo, monospace; font-size: 10px; color: #475569; }
+  td.tick { width: 56px; }
+  .muted { color: #94a3b8; } .small { font-size: 10px; margin-top: 2px; }
+  tr.start td { background: #fffbeb; }
+  .foot { display: flex; justify-content: space-between; gap: 24px; margin-top: 28px; }
+  .sig { flex: 1; border-top: 1px solid #0f172a; padding-top: 4px; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: #64748b; font-weight: 700; }
+  .gen { margin-top: 10px; font-size: 9px; color: #94a3b8; }
+</style></head><body>
+  <div class="head">
+    <div class="brand">JK PRODUCTS<small>Factory Order Management · Transport Route Sheet</small></div>
+    <div class="title"><div class="t">Route sequence</div><div class="d">${esc(prettyDate)}</div>${routeName.trim() ? `<div class="muted">${esc(routeName.trim())}</div>` : ""}</div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="l">Stops</div><div class="v">${orderedStops.length}</div></div>
+    <div class="kpi"><div class="l">Total bags</div><div class="v hot">${totalBags}</div></div>
+    <div class="kpi"><div class="l">Dispatches</div><div class="v">${totalDispatches}</div></div>
+    <div class="kpi"><div class="l">Distance</div><div class="v">${result?.total_distance_km != null ? `${result.total_distance_km} km` : "—"}</div></div>
+    <div class="kpi"><div class="l">Est. time</div><div class="v">${result?.total_duration_min ? `~${Math.round(result.total_duration_min)} min` : "—"}</div></div>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>Transport</th><th style="text-align:center">Bags</th><th>Parties (from Dispatch Report)</th><th>Coordinates</th><th>Done</th></tr></thead>
+    <tbody>
+      <tr class="start"><td class="num"><span class="badge start">JK</span></td><td class="name">Start · Factory</td><td class="bags zero">—</td><td class="parties muted">${esc(factory.label || "JK Products Factory")}</td><td class="coords">${Number(factory.lat).toFixed(4)}, ${Number(factory.lng).toFixed(4)}</td><td class="tick"></td></tr>
+      ${rows}
+    </tbody>
+  </table>
+  <div class="foot"><div class="sig">Driver signature</div><div class="sig">Vehicle no.</div><div class="sig">Dispatched by</div></div>
+  <div class="gen">Generated ${new Date().toLocaleString("en-IN")} · Bags are linked from the Daily Dispatch Report for ${esc(routeDate)}</div>
+</body></html>`;
+
+    let iframe = document.getElementById("__route_print_iframe__");
+    if (iframe) iframe.remove();
+    iframe = document.createElement("iframe");
+    iframe.id = "__route_print_iframe__";
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+    document.body.appendChild(iframe);
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (err) {
+        toast.error("Couldn't open the print dialog. Open this page in your browser and try again.");
+      } finally {
+        setTimeout(() => { try { iframe.remove(); } catch (_) { void 0; } }, 1500);
+      }
+    };
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+  };
 
   const loadAll = async () => {
     try {
@@ -741,6 +847,16 @@ export default function TransportRoutes() {
               <Package className="w-3.5 h-3.5 text-[#E65100]" />
               <span className="font-mono-num">{orderedStops.reduce((s, t) => s + (bagsFor(t)?.total_bags || 0), 0)}</span> bags
             </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={printRouteSheet}
+              className="h-7 px-2.5 text-[11px] font-bold uppercase tracking-wider rounded-sm border-slate-300 text-slate-800 hover:bg-slate-100 hover:border-slate-400"
+              data-testid="tr-sequence-print"
+            >
+              <Printer className="w-3.5 h-3.5 mr-1" /> Print
+            </Button>
             {result?.total_distance_km != null && (
               <span className="ml-auto text-[11px] font-bold text-slate-700">
                 Total: <span className="text-[#E65100] font-mono-num">{result.total_distance_km} km</span>
