@@ -13,7 +13,10 @@ import { toast } from "sonner";
 import {
   MapPin, Factory, Plus, Trash2, Route as RouteIcon, Save, Loader2, ListChecks,
   Map as MapIcon, Satellite, Pencil, Check, X, Crosshair, Truck, Navigation, Copy, ExternalLink, Search,
+  Package, CalendarDays,
 } from "lucide-react";
+import DatePicker from "@/components/DatePicker";
+import { todayIso } from "@/lib/dates";
 
 // Marker icon default asset shim (react-leaflet's defaults 404 without this).
 delete L.Icon.Default.prototype._getIconUrl;
@@ -210,7 +213,35 @@ export default function TransportRoutes() {
   const [result, setResult] = useState(null);            // {order, total_distance_km, total_duration_min, geometry, engine}
   const [mapStyle, setMapStyle] = useState("map");
   const [searchQ, setSearchQ] = useState("");
+  // Route date — bags per transport are pulled from the Daily Dispatch Report
+  // for this IST day and shown next to each transport in the sequence.
+  const [routeDate, setRouteDate] = useState(todayIso());
+  const [bagsByTransport, setBagsByTransport] = useState({}); // {lowercased name: {total_bags, dispatch_count, customers}}
+  const [bagsLoading, setBagsLoading] = useState(false);
   const autoTimer = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setBagsLoading(true);
+        const r = await api.get("/transport/bags-by-date", { params: { date: routeDate } });
+        if (cancelled) return;
+        const map = {};
+        (r.data?.by_transport || []).forEach((row) => {
+          map[(row.transport_name || "").trim().toLowerCase()] = row;
+        });
+        setBagsByTransport(map);
+      } catch (e) {
+        if (!cancelled) setBagsByTransport({});
+      } finally {
+        if (!cancelled) setBagsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [routeDate]);
+
+  const bagsFor = (t) => bagsByTransport[(t?.name || "").trim().toLowerCase()] || null;
 
   const loadAll = async () => {
     try {
@@ -686,10 +717,29 @@ export default function TransportRoutes() {
           before the map so the operator can see the visit sequence at a glance. */}
       {orderedStops.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-sm p-4" data-testid="tr-sequence">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <ListChecks className="w-4 h-4 text-[#E65100]" />
             <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
               Route sequence
+            </span>
+            <div className="flex items-center gap-1.5 ml-1" data-testid="tr-route-date">
+              <CalendarDays className="w-3.5 h-3.5 text-slate-500" />
+              <DatePicker
+                value={routeDate}
+                onChange={(v) => v && setRouteDate(v)}
+                max={todayIso()}
+                buttonClassName="h-7 text-[11px] px-2"
+                testId="tr-route-date-picker"
+              />
+              {bagsLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
+            </div>
+            <span
+              className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-800 bg-amber-50 border border-amber-200 rounded-sm px-2 py-0.5"
+              data-testid="tr-sequence-total-bags"
+              title="Total bags across selected transports (from Daily Dispatch Report)"
+            >
+              <Package className="w-3.5 h-3.5 text-[#E65100]" />
+              <span className="font-mono-num">{orderedStops.reduce((s, t) => s + (bagsFor(t)?.total_bags || 0), 0)}</span> bags
             </span>
             {result?.total_distance_km != null && (
               <span className="ml-auto text-[11px] font-bold text-slate-700">
@@ -720,9 +770,32 @@ export default function TransportRoutes() {
                   {i + 1}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-slate-900 truncate">{t.name}</div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="text-sm font-bold text-slate-900 truncate">{t.name}</div>
+                    {(() => {
+                      const b = bagsFor(t);
+                      const n = b?.total_bags || 0;
+                      return (
+                        <span
+                          className={`shrink-0 inline-flex items-center gap-1 text-[11px] font-bold rounded-sm px-1.5 py-0.5 border ${
+                            n > 0
+                              ? "bg-[#E65100] text-white border-[#E65100]"
+                              : "bg-white text-slate-400 border-slate-200"
+                          }`}
+                          data-testid={`tr-sequence-bags-${i}`}
+                          title={b ? `${b.dispatch_count} dispatch(es) · ${(b.customers || []).join(", ")}` : "No dispatches for this transport on this date"}
+                        >
+                          <Package className="w-3 h-3" />
+                          <span className="font-mono-num">{n}</span> bags
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <div className="text-[11px] text-slate-500 font-mono-num">
                     {Number(t.lat).toFixed(4)}, {Number(t.lng).toFixed(4)}
+                    {bagsFor(t)?.customers?.length ? (
+                      <span className="font-sans text-slate-500"> · {bagsFor(t).customers.slice(0, 3).join(", ")}{bagsFor(t).customers.length > 3 ? ` +${bagsFor(t).customers.length - 3}` : ""}</span>
+                    ) : null}
                   </div>
                 </div>
                 {i === orderedStops.length - 1 && (

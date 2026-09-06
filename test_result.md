@@ -51,6 +51,17 @@ backend:
         comment: "✓ All core endpoints working: GET /customers (902 seeded), /products (15), /items (388 SKUs), /orders (0), /dashboard/summary, /settings (overdue_days=15, edit_window_days=3), /price-lists (3), /users (3). CRUD tested: POST /customers, POST /orders, DELETE /orders, DELETE /customers all working. Minor: GET /orders/{oid} endpoint doesn't exist (405), but order verification via list endpoint works."
 
 frontend:
+  - task: "Route Sequence: date picker + bags per transport (from Daily Dispatch Report via GET /api/transport/bags-by-date)"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/TransportRoutes.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added routeDate state (default today IST), fetch bags-by-date, orange 'N bags' badge next to each transport in sequence + total bags in header + customer names. Verified via screenshot with 3 test dispatches."
   - task: "Login page and dashboard render (desktop + mobile)"
     implemented: true
     working: true
